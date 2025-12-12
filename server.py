@@ -425,6 +425,18 @@ DASHBOARD_HTML = '''
                     </div>
                     {% endfor %}
                 </div>
+                
+                <!-- Subscribe All Button -->
+                {% if pages %}
+                <div style="margin-top: 15px; padding: 15px; background: rgba(0,150,0,0.2); border-radius: 10px;">
+                    <button class="btn btn-success" onclick="subscribeAllPages()" style="width: 100%;">
+                        🔔 تفعيل Webhooks لكل الصفحات
+                    </button>
+                    <p style="color: #aaa; font-size: 0.85em; margin-top: 8px; text-align: center;">
+                        اضغط هنا بعد إضافة الصفحات لتفعيل الإشعارات
+                    </p>
+                </div>
+                {% endif %}
             </div>
             
             <!-- Comment Templates -->
@@ -612,6 +624,31 @@ DASHBOARD_HTML = '''
             
             alert(`تمت إضافة ${result.added} صفحة جديدة`);
             location.reload();
+        }
+        
+        // Subscribe all pages to webhooks
+        async function subscribeAllPages() {
+            if (!confirm('هل تريد تفعيل Webhooks لكل الصفحات المضافة؟')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/pages/subscribe-all', {method: 'POST'});
+                const result = await response.json();
+                
+                if (result.success) {
+                    let message = `تم تفعيل ${result.subscribed} من ${result.total} صفحة\n\n`;
+                    result.results.forEach(r => {
+                        message += r.success ? `✅ ${r.page}\n` : `❌ ${r.page}: ${r.error}\n`;
+                    });
+                    alert(message);
+                    location.reload();
+                } else {
+                    alert('حدث خطأ أثناء التفعيل');
+                }
+            } catch (e) {
+                alert('خطأ في الاتصال');
+            }
         }
         
         // Delete Page
@@ -851,6 +888,47 @@ def add_pages_bulk():
     
     save_data()
     return jsonify({"success": True, "added": added})
+
+@app.route("/api/pages/subscribe-all", methods=["POST"])
+@login_required
+def subscribe_all_pages():
+    """Subscribe all pages to webhooks at once"""
+    results = []
+    pages = data.get("pages", [])
+    
+    for page in pages:
+        page_id = page.get("id")
+        page_token = page.get("token")
+        page_name = page.get("name", "Unknown")
+        
+        if not page_id or not page_token:
+            results.append({"page": page_name, "success": False, "error": "Missing ID or token"})
+            continue
+        
+        try:
+            url = f"https://graph.facebook.com/v19.0/{page_id}/subscribed_apps"
+            response = requests.post(url, data={
+                "subscribed_fields": "feed,messages",
+                "access_token": page_token
+            }, timeout=10)
+            
+            if response.status_code == 200:
+                results.append({"page": page_name, "success": True})
+                add_history(page_name, "اشتراك Webhook", "نجاح", "")
+            else:
+                error_msg = response.json().get("error", {}).get("message", "Unknown error")
+                results.append({"page": page_name, "success": False, "error": error_msg[:50]})
+                add_history(page_name, "اشتراك Webhook", "فشل", error_msg[:50])
+        except Exception as e:
+            results.append({"page": page_name, "success": False, "error": str(e)[:50]})
+    
+    success_count = len([r for r in results if r["success"]])
+    return jsonify({
+        "success": True,
+        "total": len(pages),
+        "subscribed": success_count,
+        "results": results
+    })
 
 @app.route("/api/pages/<page_id>", methods=["DELETE"])
 @login_required
