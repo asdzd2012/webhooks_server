@@ -1044,11 +1044,26 @@ def webhook_handler():
                     value = change.get("value", {})
                     if value.get("item") == "comment" and value.get("verb") == "add":
                         comment_id = value.get("comment_id")
-                        user_name = value.get("from", {}).get("name", "Unknown")
+                        from_data = value.get("from", {})
+                        user_id = from_data.get("id")
+                        user_name = from_data.get("name", "Unknown")
+                        post_id = value.get("post_id")
+                        parent_id = value.get("parent_id")
+                        
+                        # Skip comments from the page itself (to avoid infinite loop)
+                        if user_id == page_id:
+                            print(f"⏭️ تخطي: تعليق من الصفحة نفسها ({user_name})")
+                            continue
                         
                         print(f"💬 New comment from {user_name}")
                         reply_to_comment(comment_id, page_id, user_name)
-                        send_private_reply(comment_id, page_id, user_name)
+                        
+                        # Only send private reply for top-level comments (not replies to replies)
+                        # Check if parent_id equals post_id (means it's a direct comment on the post)
+                        if parent_id == post_id:
+                            send_private_reply(comment_id, page_id, user_name)
+                        else:
+                            print(f"⏭️ تخطي رسالة خاصة: تعليق على تعليق (ليس تعليق أساسي)")
             
             for messaging in entry.get("messaging", []):
                 sender_id = messaging.get("sender", {}).get("id")
