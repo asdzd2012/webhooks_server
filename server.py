@@ -63,6 +63,22 @@ def save_history():
         # Keep last 1000 entries
         json.dump(history[-1000:], f, ensure_ascii=False, indent=2)
 
+PROCESSED_FILE = "processed.json"
+
+def load_processed():
+    global processed_comments
+    try:
+        with open(PROCESSED_FILE, "r", encoding="utf-8") as f:
+            processed_comments = set(json.load(f))
+    except:
+        processed_comments = set()
+
+def save_processed():
+    with open(PROCESSED_FILE, "w", encoding="utf-8") as f:
+        # Keep last 500 only to prevent file from growing too large
+        comments_list = list(processed_comments)[-500:]
+        json.dump(comments_list, f)
+
 def add_history(page_name, action, status, details=""):
     history.append({
         "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -101,8 +117,14 @@ def get_page_token(page_id):
     return None, None
 
 def reply_to_comment(comment_id, page_id, user_name):
+    # Check if already processed FIRST to prevent duplicates
     if comment_id in processed_comments:
+        print(f"⏭️ تعليق معالج مسبقاً: {comment_id}")
         return False
+    
+    # Add to processed IMMEDIATELY to prevent duplicates from webhook retries
+    processed_comments.add(comment_id)
+    save_processed()  # Save to file immediately
     
     if not data["settings"].get("auto_reply_comments", True):
         return False
@@ -127,13 +149,15 @@ def reply_to_comment(comment_id, page_id, user_name):
         }, timeout=10)
         
         if response.status_code == 200:
-            processed_comments.add(comment_id)
             add_history(page_name, "رد على تعليق", "نجاح", f"الرد على {user_name}: {reply_text[:50]}...")
             return True
         else:
-            add_history(page_name, "رد على تعليق", "فشل", response.text[:100])
+            error_text = response.text[:100]
+            print(f"❌ فشل الرد: {error_text}")
+            add_history(page_name, "رد على تعليق", "فشل", error_text)
             return False
     except Exception as e:
+        print(f"❌ استثناء: {e}")
         add_history(page_name, "رد على تعليق", "خطأ", str(e)[:100])
         return False
 
@@ -143,10 +167,12 @@ def send_private_reply(comment_id, page_id, user_name):
     
     token, page_name = get_page_token(page_id)
     if not token:
+        print(f"⚠️ رسالة خاصة: لا يوجد توكن للصفحة {page_id}")
         return False
     
     templates = data.get("message_templates", [])
     if not templates:
+        print("⚠️ رسالة خاصة: لا يوجد قوالب رسائل")
         return False
     
     template = random.choice(templates)
@@ -163,8 +189,12 @@ def send_private_reply(comment_id, page_id, user_name):
             add_history(page_name, "رسالة خاصة", "نجاح", f"رسالة لـ {user_name}")
             return True
         else:
+            error_text = response.text[:100]
+            print(f"❌ فشل الرسالة الخاصة: {error_text}")
+            add_history(page_name, "رسالة خاصة", "فشل", error_text)
             return False
-    except:
+    except Exception as e:
+        print(f"❌ استثناء رسالة خاصة: {e}")
         return False
 
 def reply_to_message(sender_id, page_id):
@@ -1036,6 +1066,7 @@ if __name__ == "__main__":
     print("=" * 50)
     
     load_data()
+    load_processed()  # Load processed comments to prevent duplicates
     
     port = int(os.getenv("PORT", 5000))
     print(f"🌐 Server running on port {port}")
