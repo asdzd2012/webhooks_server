@@ -178,20 +178,26 @@ def send_private_reply(comment_id, page_id, user_name):
     template = random.choice(templates)
     message_text = process_spintax(template)
     
-    url = f"https://graph.facebook.com/v19.0/{comment_id}/private_replies"
+    # Use the correct API: POST to /{page_id}/messages with recipient.comment_id
+    url = f"https://graph.facebook.com/v19.0/{page_id}/messages"
     try:
-        response = requests.post(url, data={
-            "message": message_text,
-            "access_token": token
-        }, timeout=10)
+        payload = {
+            'recipient': json.dumps({'comment_id': comment_id}),
+            'message': json.dumps({'text': message_text}),
+            'access_token': token
+        }
+        
+        print(f"📨 إرسال رسالة خاصة لـ {user_name}...")
+        response = requests.post(url, data=payload, timeout=10)
         
         if response.status_code == 200:
             add_history(page_name, "رسالة خاصة", "نجاح", f"رسالة لـ {user_name}")
+            print(f"✅ تم إرسال رسالة خاصة لـ {user_name}")
             return True
         else:
-            error_text = response.text[:100]
+            error_text = response.text[:150]
             print(f"❌ فشل الرسالة الخاصة: {error_text}")
-            add_history(page_name, "رسالة خاصة", "فشل", error_text)
+            add_history(page_name, "رسالة خاصة", "فشل", error_text[:80])
             return False
     except Exception as e:
         print(f"❌ استثناء رسالة خاصة: {e}")
